@@ -16,3 +16,7 @@ gunicorn
 django-cors-headers
 langchain-community==0.0.20
 daphne==4.0  
+pdf2image
+PyPDF2
+reportlab
+confluent-kafka

@@ -8,6 +8,7 @@ class TenantUser(AbstractUser):
         ('pro', 'Pro'),
         ('enterprise', 'Enterprise'),
     ]
+    email = models.EmailField(unique=True) 
     company_name = models.CharField(max_length=255, blank=True)
     plan = models.CharField(
         max_length=20,

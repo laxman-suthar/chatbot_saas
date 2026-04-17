@@ -3,7 +3,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.utils import timezone
 from .models import ChatSession, Message, RequestCallback
-from .agent import build_agent, ESCALATION_SENTINEL
+from .agent import build_agent, ESCALATION_SENTINEL, wants_human_agent
 from websites.models import Website
 
 
@@ -71,7 +71,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     'role': 'assistant',
                     'message': (
                         f"Thank you, {name}! ✅\n\n"
-                        f"Our support team will reach you on **{phone}** shortly. "
+                        f"We've received your request and our team will reach out to you shortly. "
                         f"Is there anything else I can help you with?"
                     )
                 }))
@@ -89,13 +89,22 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 'message': 'Agent is typing...'
             }))
 
+            # Fast AI intent check — catches any phrasing before running the full agent
+            is_human_request = await database_sync_to_async(wants_human_agent)(user_message)
+            if is_human_request:
+                await self.send(text_data=json.dumps({
+                    'type': 'callback_form_request',
+                    'message': "Sure! Please share your details and our team will get back to you."
+                }))
+                return
+
             response = await database_sync_to_async(
                 self.agent.invoke
             )({'input': user_message})
 
             ai_response = response.get('output', 'I am unable to process your request right now.')
 
-            # If the AI used EscalateToHuman tool, show the callback form
+            # Fallback: if the ReAct agent still used EscalateToHuman tool
             if ESCALATION_SENTINEL in ai_response:
                 await self.send(text_data=json.dumps({
                     'type': 'callback_form_request',

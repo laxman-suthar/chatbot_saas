@@ -3,17 +3,19 @@ from .models import Document
 
 
 class DocumentSerializer(serializers.ModelSerializer):
-    file_size_kb = serializers.SerializerMethodField()
-
+    website_name = serializers.CharField(source='website.name', read_only=True)
+    
     class Meta:
         model = Document
         fields = [
             'id',
+            'website',
+            'website_name',
             'title',
-            'file',
+            'file', 
             'file_type',
             'file_size',
-            'file_size_kb',
+            'doc_type',
             'status',
             'error_message',
             'chunk_count',
@@ -22,40 +24,49 @@ class DocumentSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'id',
+            'website_name',
             'file_type',
             'file_size',
-            'file_size_kb',
-            'status',
-            'error_message',
             'chunk_count',
             'uploaded_at',
             'processed_at',
+            'error_message',
+            'status',
         ]
-
-    def get_file_size_kb(self, obj):
-        return round(obj.file_size / 1024, 2) if obj.file_size else 0
 
 
 class DocumentUploadSerializer(serializers.ModelSerializer):
+    """
+    Serializer for file uploads only.
+    For text uploads, use the API directly with JSON.
+    """
     class Meta:
         model = Document
         fields = ['title', 'file']
-
+    
     def validate_file(self, value):
+        """Validate file size (max 10MB)"""
+        max_size = 10 * 1024 * 1024  # 10MB
+        if value.size > max_size:
+            raise serializers.ValidationError(
+                f"File size exceeds 10MB limit. Current size: {value.size / 1024 / 1024:.2f}MB"
+            )
+        
+        # Validate file type
         allowed_types = [
             'application/pdf',
             'text/plain',
             'application/msword',
-            'application/vnd.openxmlformats-officedocument'
-            '.wordprocessingml.document'
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         ]
         if value.content_type not in allowed_types:
             raise serializers.ValidationError(
-                'Only PDF, TXT, DOC, DOCX files are allowed'
+                f"File type not supported. Allowed: PDF, TXT, DOC, DOCX"
             )
-        # max 10MB
-        if value.size > 10 * 1024 * 1024:
-            raise serializers.ValidationError(
-                'File size must be under 10MB'
-            )
+        
         return value
+    
+    def create(self, validated_data):
+        """Create document with doc_type='file'"""
+        validated_data['doc_type'] = 'file'
+        return super().create(validated_data)

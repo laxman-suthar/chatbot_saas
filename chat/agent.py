@@ -1,14 +1,13 @@
 from django.conf import settings
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import AgentExecutor, create_react_agent
 from langchain.tools import Tool
 from langchain.prompts import PromptTemplate
 from langchain.memory import ConversationBufferWindowMemory
 from knowledge_base.rag import query_knowledge_base
 from .tasks import send_whatsapp_escalation
+from .utils import FlattenedGemini
 
 
-# Sentinel returned by EscalateToHuman so the consumer knows to show the callback form
 ESCALATION_SENTINEL = '__SHOW_CALLBACK_FORM__'
 
 
@@ -17,8 +16,8 @@ def wants_human_agent(message: str) -> bool:
     Use a fast Gemini call to classify whether the user's intent
     is to reach a human — works for any phrasing, language, or typo.
     """
-    llm = ChatGoogleGenerativeAI(
-        model='gemini-2.0-flash',
+    llm = FlattenedGemini(
+        model=settings.GOOGLE_TEXT_MODEL,
         google_api_key=settings.GOOGLE_API_KEY,
         temperature=0,
         convert_system_message_to_human=True,
@@ -46,9 +45,17 @@ def escalate_to_human(reason: str) -> str:
     return ESCALATION_SENTINEL
 
 
+def query_knowledge_base_tool(question: str, website_id: str) -> str:
+    try:
+        result = query_knowledge_base(website_id, question)
+        return str(result)
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
 def build_agent(website_id: str, session_id: str):
-    llm = ChatGoogleGenerativeAI(
-        model='gemini-2.5-flash',
+    llm = FlattenedGemini(
+        model=settings.GOOGLE_TEXT_MODEL,
         google_api_key=settings.GOOGLE_API_KEY,
         temperature=0.3,
         convert_system_message_to_human=True
@@ -57,7 +64,7 @@ def build_agent(website_id: str, session_id: str):
     tools = [
         Tool(
             name='KnowledgeBase',
-            func=lambda q: query_knowledge_base(website_id, q),
+            func=lambda q: query_knowledge_base_tool(q, website_id),
             description=(
                 'Use this to answer questions about the company, '
                 'products, services, FAQs, policies, or any '

@@ -17,11 +17,12 @@ class Website(models.Model):
     name = models.CharField(max_length=255)
     domain = models.URLField(unique=True)
     api_key = models.UUIDField(
-        default=uuid.uuid4,
         unique=True,
-        editable=False
+        editable=False,
+        null=True,
+        blank=True,
     )
-    is_active = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -1,12 +1,16 @@
 from rest_framework import serializers
 from .models import TenantUser
+import uuid
 
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(
         write_only=True,
         min_length=8,
-        style={'input_type': 'password'}
+        style={'input_type': 'password'},
+        error_messages={
+            'min_length': 'Password must be at least 8 characters long.'
+        }
     )
     confirm_password = serializers.CharField(
         write_only=True,
@@ -17,7 +21,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         model = TenantUser
         fields = [
             'id',
-            'username',
+            'first_name',
             'email',
             'password',
             'confirm_password',
@@ -39,7 +43,8 @@ class RegisterSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data.pop('confirm_password')
         user = TenantUser.objects.create_user(
-            username=validated_data['username'],
+            username=f"user_{uuid.uuid4().hex}",
+            first_name=validated_data['first_name'],
             email=validated_data['email'],
             password=validated_data['password'],
             company_name=validated_data.get('company_name', '')
@@ -60,6 +65,8 @@ class UserSerializer(serializers.ModelSerializer):
         model = TenantUser
         fields = [
             'id',
+            'first_name',
+            'last_name',
             'username',
             'email',
             'company_name',
@@ -73,7 +80,7 @@ class UserSerializer(serializers.ModelSerializer):
 class UpdateProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = TenantUser
-        fields = ['username', 'company_name']
+        fields = ['username', 'company_name','first_name','last_name']
 
     def validate_username(self, value):
         user = self.context['request'].user

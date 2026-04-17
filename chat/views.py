@@ -4,7 +4,8 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema
 from django.utils import timezone
-
+from django.db.models import Q
+from drf_spectacular.utils import OpenApiParameter
 from websites.models import Website
 from .models import ChatSession
 from .serializers import (
@@ -15,17 +16,34 @@ from .serializers import (
 
 class ChatSessionListView(APIView):
     permission_classes = [IsAuthenticated]
-
+ 
     def get_website(self, website_id, user):
         try:
             return Website.objects.get(id=website_id, owner=user)
         except Website.DoesNotExist:
             return None
-
+ 
     @extend_schema(
         tags=['Chat'],
         summary='List all chat sessions for a website',
-        responses={200: ChatSessionListSerializer(many=True)}
+        parameters=[
+            OpenApiParameter(
+                name='status',
+                type=str,
+                location=OpenApiParameter.QUERY,
+                description='Filter by session status: active or closed',
+                required=False,
+                enum=['active', 'closed'],
+            ),
+            OpenApiParameter(
+                name='search',
+                type=str,
+                location=OpenApiParameter.QUERY,
+                description='Search by visitor name or email',
+                required=False,
+            ),
+        ],
+        responses={200: ChatSessionListSerializer(many=True)},
     )
     def get(self, request, website_id):
         website = self.get_website(website_id, request.user)
@@ -34,9 +52,30 @@ class ChatSessionListView(APIView):
                 {'error': 'Website not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
+ 
         sessions = ChatSession.objects.filter(
             website=website
         ).prefetch_related('messages')
+ 
+        # Filter by status
+        status_param = request.query_params.get('status')
+        if status_param in ('active', 'closed'):
+            if status_param =='active':
+
+                sessions = sessions.filter(is_active=True)
+            else:
+                sessions = sessions.filter(is_active=False)
+ 
+        # Search by visitor name or email (case-insensitive)
+        search = request.query_params.get('search', '').strip()
+        if search:
+            sessions = sessions.filter(
+                Q(visitor_name__icontains=search) |
+                Q(visitor_email__icontains=search)
+            )
+ 
+        sessions = sessions.order_by('-created_at')
+ 
         return Response(
             ChatSessionListSerializer(sessions, many=True).data
         )

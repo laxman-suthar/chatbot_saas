@@ -4,7 +4,8 @@ from .views import (
     WebsiteDetailView,
     RegenerateAPIKeyView,
     ToggleWebsiteStatusView,
-    EmbedScriptView
+    EmbedScriptView,
+    ResolveWebsiteView,
 )
 
 urlpatterns = [
@@ -14,6 +15,8 @@ urlpatterns = [
         WebsiteListCreateView.as_view(),
         name='website-list-create'
     ),
+    # just check for setup 
+    path('resolve/', ResolveWebsiteView.as_view()),
     # detail + update + delete
     path(
         '<uuid:website_id>/',
@@ -38,4 +41,6 @@ urlpatterns = [
         EmbedScriptView.as_view(),
         name='embed-script'
     ),
+
+    
 ]

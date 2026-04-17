@@ -185,22 +185,22 @@ class ToggleWebsiteStatusView(APIView):
 class EmbedScriptView(APIView):
     permission_classes = [IsAuthenticated]
 
-    @extend_schema(
-        tags=['Websites'],
-        summary='Get embed script for a website',
-        responses={200: EmbedScriptSerializer}
-    )
     def get(self, request, website_id):
         try:
-            website = Website.objects.get(
-                id=website_id,
-                owner=request.user
-            )
-            # build embed script
-            base_url = request.build_absolute_uri('/').rstrip('/')
+            website = Website.objects.get(id=website_id, owner=request.user)
+            
+            # Generate api_key if null
+            if not website.api_key:
+                website.api_key = uuid.uuid4()
+                website.save()
+
+            scheme = request.scheme
+            host = request.get_host().split(':')[0]  # removes port
+            base_url = f"{scheme}://{host}"
             script_tag = (
                 f'<script src="{base_url}/static/widget.js" '
-                f'data-api-key="{website.api_key}"></script>'
+                f'data-api-key="{website.api_key}"'
+                f'data-ws-host="{request.get_host().split(":")[0]}"></script>'
             )
             return Response({
                 'api_key': str(website.api_key),
@@ -208,7 +208,17 @@ class EmbedScriptView(APIView):
                 'websocket_url': f'wss://{request.get_host()}/ws/chat/{website.id}/'
             })
         except Website.DoesNotExist:
-            return Response(
-                {'error': 'Website not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({'error': 'Website not found'}, status=status.HTTP_404_NOT_FOUND)
+
+class ResolveWebsiteView(APIView):
+    permission_classes = []  # public endpoint
+
+    def get(self, request):
+        api_key = request.query_params.get('api_key')
+        if not api_key:
+            return Response({'error': 'api_key required'}, status=400)
+        try:
+            website = Website.objects.get(api_key=api_key, is_active=True)
+            return Response({'website_id': str(website.id)})
+        except Website.DoesNotExist:
+            return Response({'error': 'Invalid api_key'}, status=404)
