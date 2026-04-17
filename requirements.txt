@@ -20,3 +20,5 @@ pdf2image
 PyPDF2
 reportlab
 confluent-kafka
+google-auth
+social-auth-app-django

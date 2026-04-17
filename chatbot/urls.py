@@ -22,4 +22,5 @@ urlpatterns = [
     path('api/knowledge/', include('knowledge_base.urls')),
     path('api/chat/', include('chat.urls')),
     path('api/analytics/', include('analytics.urls')),
+    path('api/auth/', include('accounts.google_urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

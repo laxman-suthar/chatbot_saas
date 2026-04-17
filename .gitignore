@@ -4,4 +4,4 @@ __pycache__/
 staticfiles/
 media/
 .vscode/
-/migrations/*
+/chroma/*
