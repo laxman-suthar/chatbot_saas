@@ -7,7 +7,8 @@ A multi-tenant AI chatbot platform that lets you embed a smart support widget on
 ## 📸 Screenshots
 
 ### Dashboard
-![Dashboard](screenshot_dashboard.png)
+![Dashboard](<img width="1456" height="819" alt="image" src="https://github.com/user-attachments/assets/d275db13-d543-4e09-92b2-cd0adb4df725" />
+)
 
 ### Website Detail & Embed Script
 ![Website Detail](screenshot_website_detail.png)
