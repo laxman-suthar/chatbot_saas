@@ -7,21 +7,26 @@ A multi-tenant AI chatbot platform that lets you embed a smart support widget on
 ## 📸 Screenshots
 
 ### Dashboard
-![Dashboard](<img width="1456" height="819" alt="image" src="https://github.com/user-attachments/assets/d275db13-d543-4e09-92b2-cd0adb4df725" />
-)
+![Dashboard]<img width="1456" height="819" alt="image" src="https://github.com/user-attachments/assets/d275db13-d543-4e09-92b2-cd0adb4df725" />
+
 
 ### Website Detail & Embed Script
-![Website Detail](screenshot_website_detail.png)
+![Website Detail]<img width="1456" height="819" alt="image" src="https://github.com/user-attachments/assets/7b21b874-b76c-4d5c-aa2a-0f18a5cf22ba" />
+
 
 ### Edit Website & Visitor Info Fields
-![Edit Website](screenshot_edit_website.png)
+![Edit Website] <img width="1456" height="819" alt="image" src="https://github.com/user-attachments/assets/35f330c8-d709-449a-add5-e38a1bba4390" />
+
 
 ### Chat Session View (Agent Side)
-![Chat Session](screenshot_chat_session.png)
-![Chat Session 2](screenshot_chat_session2.png)
+![Chat Session]<img width="1456" height="819" alt="image" src="https://github.com/user-attachments/assets/e7edd23a-3298-4014-9025-d57daf5d2923" />
+
+![Chat Session 2] <img width="1456" height="819" alt="image" src="https://github.com/user-attachments/assets/f7a562e6-74ac-4423-b73c-822a6624cf5d" />
+
 
 ### Live Chat Widget (Visitor Side)
-![Widget](screenshot_widget.png)
+![Widget] <img width="1456" height="819" alt="image" src="https://github.com/user-attachments/assets/9a0a7694-711c-40f8-9260-d52cca276691" />
+
 
 ---
 
