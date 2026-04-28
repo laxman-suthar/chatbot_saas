@@ -162,6 +162,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 {'type': 'agent_disconnected'}
             )
             await self.set_live_agent_active(False)
+            self.is_live_agent=False
         else:
             logger.info(f"🔴 [VISITOR] Disconnected | is_live_agent_active={self.is_live_agent_active}")
             if self.is_live_agent_active:
@@ -177,7 +178,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
     async def receive(self, text_data):
         try:
             data = json.loads(text_data)
-
+            print()
+            print(self.__dict__)
             # ── Live agent ────────────────────────────────────────────────────
             if self.is_live_agent:
                 msg_type = data.get('type')
@@ -234,7 +236,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 )
                 return
 
-            if self.collecting_fields:
+            if self.escalated and  self.collecting_fields:
                 for field in self.required_fields:
                     key = field.get('key') if isinstance(field, dict) else field
                     if key not in self.collected_fields:

@@ -422,6 +422,11 @@
           'margin-right:auto'
         );
         div.innerHTML = parseMarkdown(text);
+      } else if (role === 'human_agent') {
+        // ── NEW: visually distinct from AI responses ──────────────────────────
+        base.push('background:#e8f5e9', 'color:#1b5e20', 'align-self:flex-start',
+          'border-bottom-left-radius:4px', 'box-shadow:0 2px 8px rgba(0,0,0,0.09)', 'margin-right:auto');
+        div.innerHTML = '🧑‍💼 ' + parseMarkdown(text);
       } else {
         base.push(
           'background:#eef0ff',
@@ -532,7 +537,7 @@
             if (msg) addMessage('assistant', msg);
 
           } else if (data.type === 'typing') {
-            showTyping(true);
+            // showTyping(true);
 
           } else if (data.type === 'waiting_for_agent') {
             // show this as a prominent system message — don't skip it
@@ -542,7 +547,7 @@
             addMessage('system', '🟢 ' + data.message);
 
           } else if (data.type === 'agent_message') {
-            addMessage('assistant', data.message);
+            addMessage('human_agent', data.message);
 
           } else if (data.type === 'agent_disconnected') {
             addMessage('system', '🔴 ' + data.message);
@@ -552,7 +557,7 @@
 
           } else if (data.type === 'error') {
             addMessage('system', '⚠️ ' + data.message);
-          }  else if (data.type === 'history') {
+          } else if (data.type === 'history') {
             data.messages.forEach(function (msg) {
               if (msg.role === 'user') {
                 addMessage('user', msg.content);
@@ -574,6 +579,13 @@
           localStorage.removeItem(`cw_session_${websiteId}`);
           sessionId = null;
         }
+        if (event.code === 4003) {
+          const currentDomain = window.location.origin;
+          // gives "http://localhost:3001" or "https://myshop.com"
+          console.error(`${currentDomain} Domain not authorized.`);
+          setStatus('Not authorized');
+          return; // don't retry
+        }
         setStatus('Disconnected — retrying…');
         sendBtn.disabled = true;
         showTyping(false);
@@ -592,7 +604,7 @@
       addMessage('user', text);
       ws.send(JSON.stringify({ message: text }));
       input.value = '';
-      showTyping(true);
+      // showTyping(true);
     }
 
     sendBtn.addEventListener('click', send);
