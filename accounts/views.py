@@ -6,7 +6,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from django.contrib.auth import authenticate
 from drf_spectacular.utils import extend_schema, OpenApiExample
-
+import json
 from .models import TenantUser
 from .serializers import (
     RegisterSerializer,
@@ -43,11 +43,42 @@ class RegisterView(APIView):
         if serializer.is_valid():
             user = serializer.save()
             refresh = RefreshToken.for_user(user)
-            return Response({
+            response=Response({
                 'user': UserSerializer(user).data,
                 'access': str(refresh.access_token),
                 'refresh': str(refresh),
             }, status=status.HTTP_201_CREATED)
+            response.set_cookie(
+            'authToken',
+            str(refresh.access_token),
+            max_age=3600,
+            httponly=False,
+            secure=True,
+            samesite='None',  # Change this to None for cross-site
+            path='/',
+        )
+
+            user_data = UserSerializer(user).data
+            response.set_cookie(
+                'user',
+                json.dumps(user_data),
+                max_age=3600 * 24 * 7,
+                httponly=False,
+                secure=True,
+                samesite='None',  # Change this
+                path='/',
+            )
+
+            response.set_cookie(
+                'refreshToken',
+                str(refresh),
+                max_age=3600 * 24 * 7,
+                httponly=False,
+                secure=True,
+                samesite='None',  # Change this
+                path='/',
+            )
+            return response
         return Response(
             serializer.errors,
             status=status.HTTP_400_BAD_REQUEST
@@ -92,11 +123,42 @@ class LoginView(APIView):
             )
 
         refresh = RefreshToken.for_user(user)
-        return Response({
+        response =Response({
             'user': UserSerializer(user).data,
             'access': str(refresh.access_token),
             'refresh': str(refresh),
         })
+        response.set_cookie(
+            'authToken',
+            str(refresh.access_token),
+            max_age=3600,
+            httponly=False,
+            secure=True,
+            samesite='None',  # Change this to None for cross-site
+            path='/',
+        )
+
+        user_data = UserSerializer(user).data
+        response.set_cookie(
+                'user',
+                json.dumps(user_data),
+                max_age=3600 * 24 * 7,
+                httponly=False,
+                secure=True,
+                samesite='None',  # Change this
+                path='/',
+            )
+
+        response.set_cookie(
+                'refreshToken',
+                str(refresh),
+                max_age=3600 * 24 * 7,
+                httponly=False,
+                secure=True,
+                samesite='None',  # Change this
+                path='/',
+            )
+        return response
 
 
 class LogoutView(APIView):

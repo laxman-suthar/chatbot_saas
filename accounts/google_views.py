@@ -2,20 +2,21 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from .models import TenantUser
 from rest_framework.views import APIView
-from rest_framework.permissions import  AllowAny
+from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.response import Response
-from .serializers import  UserSerializer
+from .serializers import UserSerializer
 from django.conf import settings
+import json
+
 
 class GoogleAuthView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        token = request.data.get('credential')  # Google ID token from frontend
+        token = request.data.get('credential')
         
         try:
-            # Verify the Google token
             idinfo = id_token.verify_oauth2_token(
                 token,
                 google_requests.Request(),
@@ -27,7 +28,6 @@ class GoogleAuthView(APIView):
         email = idinfo['email']
         name = idinfo.get('given_name', '')
         
-        # Get or create user
         user, created = TenantUser.objects.get_or_create(
             email=email,
             defaults={
@@ -37,8 +37,41 @@ class GoogleAuthView(APIView):
         )
         
         refresh = RefreshToken.for_user(user)
-        return Response({
-            'user': UserSerializer(user).data,
-            'access': str(refresh.access_token),
-            'refresh': str(refresh),
+        user_data = UserSerializer(user).data
+        
+        response = Response({
+            'success': True,
         }, status=201 if created else 200)
+        
+        # Auth token (httpOnly, secure)
+        response.set_cookie(
+            'authToken',
+            str(refresh.access_token),
+            max_age=3600,
+            httponly=False,
+            secure=True,
+            samesite='None',  # Change this to None for cross-site
+            path='/',
+        )
+
+        response.set_cookie(
+            'user',
+            json.dumps(user_data),
+            max_age=3600 * 24 * 7,
+            httponly=False,
+            secure=True,
+            samesite='None',  # Change this
+            path='/',
+        )
+
+        response.set_cookie(
+            'refreshToken',
+            str(refresh),
+            max_age=3600 * 24 * 7,
+            httponly=False,
+            secure=True,
+            samesite='None',  # Change this
+            path='/',
+        )
+        
+        return response

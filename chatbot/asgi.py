@@ -2,21 +2,24 @@ import os
 import django
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'chatbot.settings')
-
-# ← setup django BEFORE importing anything else
 django.setup()
 
 from django.core.asgi import get_asgi_application
 from channels.routing import ProtocolTypeRouter, URLRouter
-from channels.auth import AuthMiddlewareStack
-from django.urls import path
+from django.urls import re_path
 from chat.consumers import ChatConsumer
+from chat.notification_consumer import NotificationConsumer
+from chat.jwt_middleware import JwtCookieMiddleware
 
 application = ProtocolTypeRouter({
     'http': get_asgi_application(),
-    'websocket': AuthMiddlewareStack(
-        URLRouter([
-            path('ws/chat/<uuid:website_id>/', ChatConsumer.as_asgi()),
-        ])
-    ),
+    'websocket': URLRouter([
+
+        # ── Public — visitor widget (auth handled inside consumer via api_key) ──
+        re_path(r'ws/chat/(?P<website_id>[^/]+)/(?P<session_id>[^/]+)/$', JwtCookieMiddleware(ChatConsumer.as_asgi())),
+
+      
+        re_path(r'ws/notifications/$',
+            JwtCookieMiddleware(NotificationConsumer.as_asgi())),
+    ]),
 })

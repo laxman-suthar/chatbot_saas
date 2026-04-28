@@ -308,6 +308,15 @@
     `;
   }
 
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const apiProtocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+  const API_BASE = `${apiProtocol}//${WS_HOST}`;
+  let sessionId = null;
+  let ws = null;
+  let isOpen = false;
+  let unread = 0;
+  let reconnectTimer = null;
+
   // ── Widget logic ──────────────────────────────────────────────────────────
   function init(websiteId) {
     injectStyles();
@@ -445,12 +454,64 @@
       if (show) scrollBottom();
     }
 
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const WS_URL = `${wsProtocol}://${WS_HOST}/ws/chat/${websiteId}/?api_key=${API_KEY}`;
+
+
+    function saveSession(id) {
+      localStorage.setItem(`cw_session_${websiteId}`, JSON.stringify({
+        id: id,
+        expires: Date.now() + (24 * 60 * 60 * 1000)
+      }));
+    }
+
+    function loadSession() {
+      try {
+        const raw = localStorage.getItem(`cw_session_${websiteId}`);
+        if (!raw) return null;
+        const { id, expires } = JSON.parse(raw);
+        if (Date.now() < expires) return id;
+        localStorage.removeItem(`cw_session_${websiteId}`);
+        return null;
+      } catch {
+        return null;
+      }
+    }
 
     function connect() {
       setStatus('Connecting…');
-      ws = new WebSocket(WS_URL);
+      sendBtn.disabled = true;
+
+      if (!sessionId) {
+        sessionId = loadSession();
+      }
+
+      if (sessionId) {
+        openWebSocket();
+        return;
+      }
+
+      fetch(`${API_BASE}/api/chat/session/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ website_id: websiteId, api_key: API_KEY }),
+      })
+        .then(function (r) {
+          if (!r.ok) throw new Error('Invalid api_key or website_id');
+          return r.json();
+        })
+        .then(function (data) {
+          sessionId = data.session_id;
+          saveSession(sessionId);
+          openWebSocket();
+        })
+        .catch(function (err) {
+          console.warn('[ChatWidget] Session init failed:', err);
+          setStatus('Could not connect — retrying…');
+          reconnectTimer = setTimeout(connect, 3500);
+        });
+    }
+
+    function openWebSocket() {
+      ws = new WebSocket(`${wsProtocol}://${WS_HOST}/ws/chat/${websiteId}/${sessionId}/`);
 
       ws.onopen = function () {
         setStatus('Online · Ready to help');
@@ -461,19 +522,58 @@
         try {
           const data = JSON.parse(event.data);
           showTyping(false);
-          if (data.type === 'connection_established' || data.type === 'message') {
+
+          if (data.type === 'connection_established') {
             addMessage('assistant', data.message);
+
+          } else if (data.type === 'message') {
+            // strip ESCALATION_SENTINEL if it leaked through
+            const msg = data.message.replace('__ESCALATE_TO_HUMAN__', '').trim();
+            if (msg) addMessage('assistant', msg);
+
           } else if (data.type === 'typing') {
             showTyping(true);
+
+          } else if (data.type === 'waiting_for_agent') {
+            // show this as a prominent system message — don't skip it
+            addMessage('system', '🚨 ' + data.message);
+
+          } else if (data.type === 'agent_joined') {
+            addMessage('system', '🟢 ' + data.message);
+
+          } else if (data.type === 'agent_message') {
+            addMessage('assistant', data.message);
+
+          } else if (data.type === 'agent_disconnected') {
+            addMessage('system', '🔴 ' + data.message);
+
+          } else if (data.type === 'agent_rejected') {
+            addMessage('system', '😔 ' + data.message);
+
           } else if (data.type === 'error') {
-            addMessage('system', '⚠ ' + data.message);
+            addMessage('system', '⚠️ ' + data.message);
+          }  else if (data.type === 'history') {
+            data.messages.forEach(function (msg) {
+              if (msg.role === 'user') {
+                addMessage('user', msg.content);
+              } else if (msg.role === 'assistant' || msg.role === 'agent') {
+                addMessage('assistant', msg.content);
+              } else if (msg.role === 'system') {
+                addMessage('system', msg.content);
+              }
+            });
           }
+
         } catch (e) {
           console.warn('[ChatWidget] Bad message:', e);
         }
       };
 
-      ws.onclose = function () {
+      ws.onclose = function (event) {
+        if (event.code === 4010) {
+          localStorage.removeItem(`cw_session_${websiteId}`);
+          sessionId = null;
+        }
         setStatus('Disconnected — retrying…');
         sendBtn.disabled = true;
         showTyping(false);
@@ -513,9 +613,9 @@
     }
   } else {
     const scriptSrc = scriptTag.src;
-    const baseUrl = scriptSrc.substring(0, scriptSrc.lastIndexOf('/static/'));
+    const baseUrl = WS_HOST;
 
-    fetch(baseUrl + '/api/websites/resolve/?api_key=' + API_KEY)
+    fetch(API_BASE + '/api/websites/resolve/?api_key=' + API_KEY)
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (data.website_id) {

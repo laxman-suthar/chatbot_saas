@@ -1,44 +1,12 @@
 version: '3.9'
 
 services:
-  db:
-    image: postgres:15-alpine
-    container_name: chatbot_db
-    restart: always
-    environment:
-      POSTGRES_DB: ${DB_NAME}
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    networks:
-      - chatbot-network
-
   redis:
     image: redis:7-alpine
     container_name: chatbot_redis
     restart: always
     ports:
       - "6379:6379"
-    networks:
-      - chatbot-network
-
-  chromadb:
-    image: chromadb/chroma:0.5.0
-    container_name: chatbot_chroma
-    restart: always
-    volumes:
-      - chroma_data:/data
-    ports:
-      - "8001:8000"
     networks:
       - chatbot-network
 
@@ -50,7 +18,9 @@ services:
       sh -c "python manage.py makemigrations &&
          python manage.py migrate &&
          python manage.py collectstatic --noinput &&
-         daphne -b 0.0.0.0 -p 8000 chatbot.asgi:application"
+         daphne -b 0.0.0.0 -p 8000 --http-timeout 60 chatbot.asgi:application"
+    environment:
+      - ASGI_THREADS=4
     volumes:
       - .:/app
       - media_data:/app/media
@@ -59,9 +29,6 @@ services:
       - "8000:8000"
     env_file:
       - .env
-    depends_on:
-      db:
-        condition: service_healthy
     networks:
       - chatbot-network
 

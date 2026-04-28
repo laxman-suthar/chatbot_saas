@@ -1,10 +1,10 @@
 import uuid
+from django.core.cache import cache
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema, OpenApiExample
-from drf_spectacular.types import OpenApiTypes
 
 from .models import Website
 from .serializers import (
@@ -12,6 +12,10 @@ from .serializers import (
     WebsiteCreateSerializer,
     EmbedScriptSerializer
 )
+
+
+def invalidate_website_cache(website_id):
+    cache.delete(f"website_{website_id}")
 
 
 class WebsiteListCreateView(APIView):
@@ -24,9 +28,7 @@ class WebsiteListCreateView(APIView):
     )
     def get(self, request):
         websites = Website.objects.filter(owner=request.user)
-        return Response(
-            WebsiteSerializer(websites, many=True).data
-        )
+        return Response(WebsiteSerializer(websites, many=True).data)
 
     @extend_schema(
         tags=['Websites'],
@@ -38,7 +40,11 @@ class WebsiteListCreateView(APIView):
                 'Create Website Example',
                 value={
                     'name': 'My Ecommerce Store',
-                    'domain': 'https://myshop.com'
+                    'domain': 'https://myshop.com',
+                    'required_fields': [
+                        {'key': 'name',  'label': 'Your Name',      'description': 'Please enter your full name'},
+                        {'key': 'email', 'label': 'Email Address',  'description': "We'll use this to follow up"},
+                    ]
                 }
             )
         ]
@@ -47,14 +53,8 @@ class WebsiteListCreateView(APIView):
         serializer = WebsiteCreateSerializer(data=request.data)
         if serializer.is_valid():
             website = serializer.save(owner=request.user)
-            return Response(
-                WebsiteSerializer(website).data,
-                status=status.HTTP_201_CREATED
-            )
-        return Response(
-            serializer.errors,
-            status=status.HTTP_400_BAD_REQUEST
-        )
+            return Response(WebsiteSerializer(website).data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class WebsiteDetailView(APIView):
@@ -66,31 +66,29 @@ class WebsiteDetailView(APIView):
         except Website.DoesNotExist:
             return None
 
-    @extend_schema(
-        tags=['Websites'],
-        summary='Get website details',
-        responses={200: WebsiteSerializer}
-    )
+    @extend_schema(tags=['Websites'], summary='Get website details', responses={200: WebsiteSerializer})
     def get(self, request, website_id):
         website = self.get_object(website_id, request.user)
         if not website:
-            return Response(
-                {'error': 'Website not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({'error': 'Website not found'}, status=status.HTTP_404_NOT_FOUND)
         return Response(WebsiteSerializer(website).data)
 
     @extend_schema(
         tags=['Websites'],
-        summary='Update website name or domain',
+        summary='Update website',
         request=WebsiteCreateSerializer,
         responses={200: WebsiteSerializer},
         examples=[
             OpenApiExample(
                 'Update Example',
                 value={
-                    'name': 'Updated Store Name',
-                    'domain': 'https://updatedshop.com'
+                    'name': 'Updated Store',
+                    'domain': 'https://updatedshop.com',
+                    'required_fields': [
+                        {'key': 'name',          'label': 'Full Name',      'description': 'Enter your full name'},
+                        {'key': 'email',         'label': 'Email',          'description': "We'll send updates here"},
+                        {'key': 'qualification', 'label': 'Qualification',  'description': 'Minimum qualification: Bachelors'},
+                    ]
                 }
             )
         ]
@@ -98,35 +96,20 @@ class WebsiteDetailView(APIView):
     def patch(self, request, website_id):
         website = self.get_object(website_id, request.user)
         if not website:
-            return Response(
-                {'error': 'Website not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        serializer = WebsiteSerializer(
-            website,
-            data=request.data,
-            partial=True
-        )
+            return Response({'error': 'Website not found'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = WebsiteSerializer(website, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
+            invalidate_website_cache(website_id)  # invalidate cache on update
             return Response(serializer.data)
-        return Response(
-            serializer.errors,
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @extend_schema(
-        tags=['Websites'],
-        summary='Delete a website',
-        responses={204: None}
-    )
+    @extend_schema(tags=['Websites'], summary='Delete a website', responses={204: None})
     def delete(self, request, website_id):
         website = self.get_object(website_id, request.user)
         if not website:
-            return Response(
-                {'error': 'Website not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({'error': 'Website not found'}, status=status.HTTP_404_NOT_FOUND)
+        invalidate_website_cache(website_id)
         website.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -134,52 +117,34 @@ class WebsiteDetailView(APIView):
 class RegenerateAPIKeyView(APIView):
     permission_classes = [IsAuthenticated]
 
-    @extend_schema(
-        tags=['Websites'],
-        summary='Regenerate API key for a website',
-        responses={200: WebsiteSerializer}
-    )
+    @extend_schema(tags=['Websites'], summary='Regenerate API key', responses={200: WebsiteSerializer})
     def post(self, request, website_id):
         try:
-            website = Website.objects.get(
-                id=website_id,
-                owner=request.user
-            )
+            website = Website.objects.get(id=website_id, owner=request.user)
             website.api_key = uuid.uuid4()
             website.save()
+            invalidate_website_cache(website_id)
             return Response(WebsiteSerializer(website).data)
         except Website.DoesNotExist:
-            return Response(
-                {'error': 'Website not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({'error': 'Website not found'}, status=status.HTTP_404_NOT_FOUND)
 
 
 class ToggleWebsiteStatusView(APIView):
     permission_classes = [IsAuthenticated]
 
-    @extend_schema(
-        tags=['Websites'],
-        summary='Toggle website active/inactive status',
-        responses={200: WebsiteSerializer}
-    )
+    @extend_schema(tags=['Websites'], summary='Toggle website active/inactive status', responses={200: WebsiteSerializer})
     def post(self, request, website_id):
         try:
-            website = Website.objects.get(
-                id=website_id,
-                owner=request.user
-            )
+            website = Website.objects.get(id=website_id, owner=request.user)
             website.is_active = not website.is_active
             website.save()
+            invalidate_website_cache(website_id)
             return Response({
                 'message': f"Website {'activated' if website.is_active else 'deactivated'}",
                 'is_active': website.is_active
             })
         except Website.DoesNotExist:
-            return Response(
-                {'error': 'Website not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({'error': 'Website not found'}, status=status.HTTP_404_NOT_FOUND)
 
 
 class EmbedScriptView(APIView):
@@ -188,30 +153,30 @@ class EmbedScriptView(APIView):
     def get(self, request, website_id):
         try:
             website = Website.objects.get(id=website_id, owner=request.user)
-            
-            # Generate api_key if null
             if not website.api_key:
                 website.api_key = uuid.uuid4()
                 website.save()
+                invalidate_website_cache(website_id)
 
-            scheme = request.scheme
-            host = request.get_host().split(':')[0]  # removes port
+            scheme   = request.scheme
+            host     = request.get_host().split(':')[0]
             base_url = f"{scheme}://{host}"
             script_tag = (
                 f'<script src="{base_url}/static/widget.js" '
-                f'data-api-key="{website.api_key}"'
-                f'data-ws-host="{request.get_host().split(":")[0]}"></script>'
+                f'data-api-key="{website.api_key}" '
+                f'data-ws-host="{request.get_host()}"></script>'
             )
             return Response({
-                'api_key': str(website.api_key),
-                'script_tag': script_tag,
+                'api_key':       str(website.api_key),
+                'script_tag':    script_tag,
                 'websocket_url': f'wss://{request.get_host()}/ws/chat/{website.id}/'
             })
         except Website.DoesNotExist:
             return Response({'error': 'Website not found'}, status=status.HTTP_404_NOT_FOUND)
 
+
 class ResolveWebsiteView(APIView):
-    permission_classes = []  # public endpoint
+    permission_classes = []
 
     def get(self, request):
         api_key = request.query_params.get('api_key')

@@ -3,25 +3,31 @@ from langchain.agents import AgentExecutor, create_react_agent
 from langchain.tools import Tool
 from langchain.prompts import PromptTemplate
 from langchain.memory import ConversationBufferWindowMemory
-from knowledge_base.rag import query_knowledge_base
-from .tasks import send_whatsapp_escalation
+from knowledge_base.rag import get_context_for_llm
 from .utils import FlattenedGemini
+import logging
+
+logger = logging.getLogger(__name__)
+
+ESCALATION_SENTINEL = '__ESCALATE_TO_HUMAN__'
 
 
-ESCALATION_SENTINEL = '__SHOW_CALLBACK_FORM__'
+def _make_llm(model_name: str, temperature: float = 0):
+    return FlattenedGemini(
+        model=model_name,
+        google_api_key=settings.GOOGLE_API_KEY,
+        temperature=temperature,
+        convert_system_message_to_human=True,
+        request_timeout=60.0
+    )
 
 
 def wants_human_agent(message: str) -> bool:
     """
-    Use a fast Gemini call to classify whether the user's intent
-    is to reach a human — works for any phrasing, language, or typo.
+    Fast Gemini call to classify whether the user wants a human.
+    Works for any phrasing, language, or typo.
+    Falls back to backup model on timeout/503.
     """
-    llm = FlattenedGemini(
-        model=settings.GOOGLE_TEXT_MODEL,
-        google_api_key=settings.GOOGLE_API_KEY,
-        temperature=0,
-        convert_system_message_to_human=True,
-    )
     prompt = (
         "You are an intent classifier. "
         "Reply with only YES or NO.\n\n"
@@ -29,39 +35,64 @@ def wants_human_agent(message: str) -> bool:
         "agent, support team, or get a callback / be contacted by a person?\n\n"
         f"Message: {message}"
     )
-    try:
-        result = llm.invoke(prompt)
-        return result.content.strip().upper().startswith('YES')
-    except Exception:
-        return False
+    for model_name in [settings.GOOGLE_TEXT_MODEL, settings.GOOGLE_TEXT_MODEL_BACKUP]:
+        try:
+            result = _make_llm(model_name).invoke(prompt)
+            return result.content.strip().upper().startswith('YES')
+        except Exception as e:
+            logger.warning(f"⚠️ Model {model_name} failed for intent classification: {e}. Trying next...")
+    logger.error("❌ All models failed for intent classification.")
+    return False
 
 
 def get_order_status(order_id: str) -> str:
+    """Tool: Check order status (example — replace with real logic)"""
     return f"Order {order_id} is currently out for delivery and will arrive within 2-3 days."
 
 
 def escalate_to_human(reason: str) -> str:
-    send_whatsapp_escalation.delay(reason)
+    """Tool: Signal that a human agent is needed. Returns sentinel string."""
+    logger.info(f"🚨 Escalation triggered: {reason}")
     return ESCALATION_SENTINEL
 
 
 def query_knowledge_base_tool(question: str, website_id: str) -> str:
+    """Tool: Query knowledge base (pgvector RAG)"""
     try:
-        result = query_knowledge_base(website_id, question)
-        return str(result)
+        context = get_context_for_llm(website_id, question)
+        return str(context)
     except Exception as e:
-        return f"Error: {str(e)}"
+        logger.error(f"❌ Knowledge base query failed: {e}")
+        return f"Error querying knowledge base: {str(e)}"
 
 
 def build_agent(website_id: str, session_id: str):
-    llm = FlattenedGemini(
-        model=settings.GOOGLE_TEXT_MODEL,
-        google_api_key=settings.GOOGLE_API_KEY,
-        temperature=0.3,
-        convert_system_message_to_human=True
-    )
+    # Try primary model, fall back to backup on failure
+    llm = None
+    for model_name in [settings.GOOGLE_TEXT_MODEL, settings.GOOGLE_TEXT_MODEL_BACKUP]:
+        try:
+            candidate = _make_llm(model_name, temperature=0.3)
+            # Quick smoke-test invoke to confirm the model is reachable
+            candidate.invoke("ping")
+            llm = candidate
+            logger.info(f"✅ Using model: {model_name}")
+            break
+        except Exception as e:
+            logger.warning(f"⚠️ Model {model_name} unavailable: {e}. Trying next...")
+
+    if llm is None:
+        raise RuntimeError("❌ All Gemini models are unavailable. Cannot build agent.")
 
     tools = [
+        Tool(
+            name='DirectResponse',
+            func=lambda x: x,
+            description=(
+            'Use this to respond directly to the customer WITHOUT querying any database. '
+            'Use for greetings, small talk, casual conversation, or when you already know the answer. '
+            'Input should be your response message.'
+            )
+        ),
         Tool(
             name='KnowledgeBase',
             func=lambda q: query_knowledge_base_tool(q, website_id),
@@ -88,8 +119,6 @@ def build_agent(website_id: str, session_id: str):
                 'contact support, talk to an agent, get a callback, '
                 'wants to be called, is frustrated, or the query cannot '
                 'be answered from available information. '
-                'Also use this when the customer expresses any intent to '
-                'connect with the team, staff, or a real person in any way. '
                 'Input should be a brief reason for escalation.'
             )
         ),
@@ -97,17 +126,14 @@ def build_agent(website_id: str, session_id: str):
 
     react_prompt = PromptTemplate.from_template("""
 You are a helpful and friendly customer support assistant.
-Always be polite and professional.
-Use the available tools to answer customer queries accurately.
-Answer questions directly from the document content.
+Always be polite, warm, and professional.
 
-IMPORTANT: Use the EscalateToHuman tool whenever the customer:
-- Asks to talk/speak/chat with a human, agent, person, or team member
-- Asks for a callback, to be called, or to contact support
-- Expresses frustration or says their issue is urgent
-- Uses phrases like "connect me", "transfer me", "I want help from a person", etc.
-- You cannot find the answer after checking the KnowledgeBase
-Do NOT just reply with text saying you've escalated — always use the EscalateToHuman tool.
+IMPORTANT RULES:
+- If the customer sends a greeting (hi, hello, hey, how are you, good morning, etc.) — respond naturally and warmly WITHOUT using any tools. Just greet them back and ask how you can help.
+- If the customer sends small talk or casual messages — respond conversationally WITHOUT using any tools.
+- Only use KnowledgeBase when customer asks something specific about the company, products, or services.
+- Use EscalateToHuman when the customer asks to talk to a human, agent, or is frustrated.
+- If KnowledgeBase returns no results, answer from your general knowledge or politely say you don't have that info.
 
 You have access to the following tools:
 {tools}
@@ -137,11 +163,7 @@ Thought:{agent_scratchpad}
         return_messages=False
     )
 
-    agent = create_react_agent(
-        llm=llm,
-        tools=tools,
-        prompt=react_prompt
-    )
+    agent = create_react_agent(llm=llm, tools=tools, prompt=react_prompt)
 
     agent_executor = AgentExecutor(
         agent=agent,

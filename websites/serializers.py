@@ -16,6 +16,7 @@ class WebsiteSerializer(serializers.ModelSerializer):
             'is_active',
             'total_documents',
             'total_sessions',
+            'required_fields',
             'created_at',
             'updated_at'
         ]

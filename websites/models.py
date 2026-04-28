@@ -22,6 +22,11 @@ class Website(models.Model):
         null=True,
         blank=True,
     )
+    required_fields = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='Fields to collect before connecting to agent e.g. ["name", "email", "phone", "issue"]'
+    )
     is_active = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

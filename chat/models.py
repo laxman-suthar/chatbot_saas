@@ -20,6 +20,8 @@ class ChatSession(models.Model):
     is_escalated = models.BooleanField(default=False)
     escalation_reason = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
+    is_live_agent_active = models.BooleanField(default=False) 
+    visitor_details = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     ended_at = models.DateTimeField(null=True, blank=True)
 
@@ -34,6 +36,7 @@ class Message(models.Model):
     ROLE_CHOICES = [
         ('user', 'User'),
         ('assistant', 'Assistant'),
+        ('agent',     'Agent'), 
         ('system', 'System'),
     ]
 
@@ -56,6 +59,9 @@ class Message(models.Model):
 
     class Meta:
         ordering = ['timestamp']
+        indexes = [
+        models.Index(fields=['session', 'timestamp'], name='message_session_timestamp_idx')
+    ]
 
     def __str__(self):
         return f"{self.role}: {self.content[:50]}"

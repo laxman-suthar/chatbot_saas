@@ -1,4 +1,3 @@
-
 import os
 from pathlib import Path
 from datetime import timedelta
@@ -13,6 +12,9 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-here')
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = os.getenv('CORS_ORIGINS', 'localhost:3000,127.0.0.1').split(',')
+CORS_ALLOWED_ORIGINS= os.getenv('CORS_ORIGINS', 'localhost:3000,127.0.0.1').split(',')
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -34,7 +36,6 @@ INSTALLED_APPS = [
 ]
 
 AUTHENTICATION_BACKENDS = [
-    'social_core.backends.google.GoogleOAuth2',
     'django.contrib.auth.backends.ModelBackend',
 ]
 MIDDLEWARE = [
@@ -42,7 +43,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
-    "django.middleware.csrf.CsrfViewMiddleware",
+    # "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -77,8 +78,25 @@ DATABASES = {
         "PASSWORD": os.getenv('DB_PASSWORD'),
         "HOST": os.getenv('DB_HOST', 'db'),
         "PORT": os.getenv('DB_PORT', '5432'),
+        "OPTIONS": {
+            "sslmode": "prefer",  # ← Change from require to prefer
+            "connect_timeout": 10,
+        }
     }
 }
+
+# supabase config
+ 
+SUPABASE_URL = os.getenv('SUPABASE_URL')
+SUPABASE_ANON_KEY = os.getenv('SUPABASE_ANON_KEY')
+SUPABASE_SERVICE_ROLE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+ 
+# Initialize Supabase client for backend operations
+from supabase import create_client
+if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
+    supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+else:
+    supabase = None
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -111,7 +129,8 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'accounts.authentication.CookieJWTAuthentication',  # ← Add this first (checks cookies)
+        'rest_framework_simplejwt.authentication.JWTAuthentication',  # ← Fallback to header
     ],
 }
 
@@ -145,13 +164,13 @@ KAFKA_CONSUMER_GROUP = os.getenv('KAFKA_CONSUMER_GROUP', 'doc-processors')
 # ── Google Gemini ─────────────────────────────────────────────────────────────
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 GOOGLE_TEXT_MODEL = os.getenv('GOOGLE_TEXT_MODEL')
+GOOGLE_TEXT_MODEL_BACKUP = os.getenv('GOOGLE_TEXT_MODEL_BACKUP')
 GOOGLE_EMBEDDING_MODEL = os.getenv('GOOGLE_EMBEDDING_MODEL')
 
 # ── ChromaDB ──────────────────────────────────────────────────────────────────
 CHROMA_PERSIST_DIR = str(BASE_DIR / 'chroma_db')
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
-CORS_ALLOW_ALL_ORIGINS = True  # restrict to specific domains in production
 
 # ── WhatsApp ──────────────────────────────────────────────────────────────────
 WHATSAPP_TOKEN = os.getenv('WHATSAPP_TOKEN')
@@ -182,4 +201,4 @@ LOGGING = {
 
 
 #google set up
-SOCIAL_AUTH_GOOGLE_OAUTH2_KEY =os.getenv('SOCIAL_AUTH_GOOGLE_OAUTH2_KEY') 
+SOCIAL_AUTH_GOOGLE_OAUTH2_KEY =os.getenv('SOCIAL_AUTH_GOOGLE_OAUTH2_KEY')

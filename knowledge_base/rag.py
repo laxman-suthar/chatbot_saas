@@ -1,7 +1,6 @@
 import os
 from django.conf import settings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_community.vectorstores import Chroma
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import (
     PyPDFLoader,
@@ -9,27 +8,22 @@ from langchain_community.document_loaders import (
     Docx2txtLoader
 )
 from langchain.schema import Document as LCDocument
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
-from chat.utils import FlattenedGemini
+from knowledge_base.models import DocumentChunk, Document
+from django.db.models import F
+from pgvector.django import L2Distance
+import logging
 
+logger = logging.getLogger(__name__)
 
-# initialize embeddings globally
+# Initialize embeddings globally
 embeddings = GoogleGenerativeAIEmbeddings(
     model=settings.GOOGLE_EMBEDDING_MODEL,
     google_api_key=settings.GOOGLE_API_KEY
 )
 
 
-def get_vectorstore(website_id: str) -> Chroma:
-    return Chroma(
-        collection_name=f"website_{str(website_id).replace('-', '_')}",
-        embedding_function=embeddings,
-        persist_directory=settings.CHROMA_PERSIST_DIR
-    )
-
-
 def get_document_loader(file_path: str, file_type: str):
+    """Get appropriate loader based on file type"""
     if file_type == 'application/pdf':
         return PyPDFLoader(file_path)
     elif file_type == 'text/plain':
@@ -41,8 +35,18 @@ def get_document_loader(file_path: str, file_type: str):
 
 
 def ingest_document(website_id: str, file_path: str, file_type: str, doc_id: str) -> int:
-    loader = get_document_loader(file_path, file_type)
-    pages = loader.load()
+    """
+    Load file → chunk → embed → store in pgvector
+    Returns chunk count
+    """
+    logger.info(f"⚙️  Ingesting document {doc_id} from file: {file_path}")
+    
+    try:
+        loader = get_document_loader(file_path, file_type)
+        pages = loader.load()
+    except Exception as e:
+        logger.error(f"❌ Failed to load document: {e}")
+        raise
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
@@ -51,18 +55,43 @@ def ingest_document(website_id: str, file_path: str, file_type: str, doc_id: str
     )
     chunks = splitter.split_documents(pages)
 
+    doc = Document.objects.get(id=doc_id)
+    chunk_count = 0
+
     for chunk in chunks:
-        chunk.metadata['website_id'] = str(website_id)
-        chunk.metadata['doc_id'] = str(doc_id)
+        try:
+            # Get embedding from Google Gemini
+            embedding_vector = embeddings.embed_query(chunk.page_content)
 
-    vectorstore = get_vectorstore(website_id)
-    vectorstore.add_documents(chunks)
-    vectorstore.persist()
+            # Store in pgvector
+            DocumentChunk.objects.create(
+                document=doc,
+                website_id=website_id,
+                content=chunk.page_content,
+                embedding=embedding_vector,
+                metadata={
+                    'doc_id': str(doc_id),
+                    'website_id': str(website_id),
+                    'source': file_path,
+                    'page': chunk.metadata.get('page', 0),
+                }
+            )
+            chunk_count += 1
+        except Exception as e:
+            logger.error(f"❌ Failed to store chunk: {e}")
+            continue
 
-    return len(chunks)
+    logger.info(f"✅ Ingested {chunk_count} chunks for document {doc_id}")
+    return chunk_count
 
 
 def ingest_text(website_id: str, text_content: str, doc_id: str) -> int:
+    """
+    Paste text → chunk → embed → store in pgvector
+    Returns chunk count
+    """
+    logger.info(f"⚙️  Ingesting text document {doc_id}")
+    
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=200,
@@ -74,82 +103,102 @@ def ingest_text(website_id: str, text_content: str, doc_id: str) -> int:
         metadata={
             'website_id': str(website_id),
             'doc_id': str(doc_id),
+            'source': 'text_paste',
         }
     )
     chunks = splitter.split_documents([raw_doc])
 
+    doc = Document.objects.get(id=doc_id)
+    chunk_count = 0
+
     for chunk in chunks:
-        chunk.metadata['website_id'] = str(website_id)
-        chunk.metadata['doc_id'] = str(doc_id)
+        try:
+            # Get embedding from Google Gemini
+            embedding_vector = embeddings.embed_query(chunk.page_content)
 
-    vectorstore = get_vectorstore(website_id)
-    vectorstore.add_documents(chunks)
-    vectorstore.persist()
+            # Store in pgvector
+            DocumentChunk.objects.create(
+                document=doc,
+                website_id=website_id,
+                content=chunk.page_content,
+                embedding=embedding_vector,
+                metadata={
+                    'doc_id': str(doc_id),
+                    'website_id': str(website_id),
+                    'source': 'text_paste',
+                }
+            )
+            chunk_count += 1
+        except Exception as e:
+            logger.error(f"❌ Failed to store chunk: {e}")
+            continue
 
-    return len(chunks)
+    logger.info(f"✅ Ingested {chunk_count} chunks for text document {doc_id}")
+    return chunk_count
 
 
-def delete_document_chunks(website_id: str, doc_id: str):
-    vectorstore = get_vectorstore(website_id)
-    vectorstore._collection.delete(
-        where={'doc_id': str(doc_id)}
-    )
-    vectorstore.persist()
+def delete_document_chunks(website_id: str, doc_id: str) -> int:
+    """Delete all chunks for a document"""
+    logger.info(f"🗑️  Deleting chunks for document {doc_id}")
+    
+    deleted_count, _ = DocumentChunk.objects.filter(
+        website_id=website_id,
+        document_id=doc_id
+    ).delete()
+    
+    logger.info(f"✅ Deleted {deleted_count} chunks")
+    return deleted_count
 
 
-def query_knowledge_base(website_id: str, question: str, chat_history: list = None) -> str:
-    if chat_history is None:
-        chat_history = []
+def query_knowledge_base(website_id: str, question: str, limit: int = 4) -> list:
+    """
+    Query pgvector for similar chunks
+    Returns list of chunks with distance
+    """
+    logger.info(f"🔍 Querying knowledge base for website {website_id}")
+    
+    try:
+        # Get embedding for question
+        query_embedding = embeddings.embed_query(question)
+    except Exception as e:
+        logger.error(f"❌ Failed to get embedding: {e}")
+        raise
 
-    vectorstore = get_vectorstore(website_id)
+    try:
+        # Search pgvector with RLS automatically enforced
+        chunks = DocumentChunk.objects.filter(
+            website_id=website_id
+        ).annotate(
+            distance=L2Distance('embedding', query_embedding)
+        ).order_by('distance')[:limit]
 
-    if vectorstore._collection.count() == 0:
-        return "No knowledge base documents found."
+        results = [
+            {
+                'id': str(chunk.id),
+                'content': chunk.content,
+                'distance': float(chunk.distance),
+                'document_id': str(chunk.document_id),
+                'metadata': chunk.metadata,
+            }
+            for chunk in chunks
+        ]
 
-    prompt_template = """You are a helpful customer support assistant.
-Use the following context to answer the question.
-If you don't know the answer, say so honestly.
+        logger.info(f"✅ Found {len(results)} similar chunks")
+        return results
 
-Context:
-{context}
+    except Exception as e:
+        logger.error(f"❌ Failed to query knowledge base: {e}")
+        raise
 
-Question: {question}
 
-Answer:"""
-
-    prompt = PromptTemplate(
-        template=prompt_template,
-        input_variables=['context', 'question']
-    )
-
-    llm = FlattenedGemini(
-        model=settings.GOOGLE_TEXT_MODEL,
-        google_api_key=settings.GOOGLE_API_KEY,
-        temperature=0.3,
-        convert_system_message_to_human=True
-    )
-
-    retriever = vectorstore.as_retriever(
-        search_type='similarity',
-        search_kwargs={'k': 4}
-    )
-
-    chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type='stuff',
-        retriever=retriever,
-        chain_type_kwargs={'prompt': prompt},
-        return_source_documents=False
-    )
-
-    result = chain.invoke({'query': question})
-
-    if isinstance(result, dict):
-        answer = result.get('result', '')
-    else:
-        answer = str(result)
-
-    if isinstance(answer, list):
-        answer = ' '.join(str(item) for item in answer)
-
-    return str(answer).strip()
+def get_context_for_llm(website_id: str, question: str, limit: int = 4) -> str:
+    """
+    Get context string for LLM (joined chunk contents)
+    """
+    results = query_knowledge_base(website_id, question, limit)
+    
+    if not results:
+        return "No relevant documents found in knowledge base."
+    
+    context = "\n\n".join([f"Document: {r['content']}" for r in results])
+    return context

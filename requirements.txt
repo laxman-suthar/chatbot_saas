@@ -21,4 +21,6 @@ PyPDF2
 reportlab
 confluent-kafka
 google-auth
-social-auth-app-django
+pgvector==0.2.5
+dj-database-url==2.1.0
+supabase

@@ -27,7 +27,6 @@ from confluent_kafka import Consumer, KafkaException, KafkaError
 from django.utils import timezone
 from knowledge_base.models import Document
 from knowledge_base.rag import ingest_document, ingest_text, delete_document_chunks
-
 logger = logging.getLogger(__name__)
 logging.basicConfig(
     level=logging.INFO,
@@ -92,87 +91,50 @@ def generate_pdf_from_text(text_content: str, filename: str=None) -> str:
 
 
 def process_upload_event(data: dict):
-    """
-    Core processing logic:
-    1. Mark document as 'processing'
-    2. Run ingestion (chunking + embedding + ChromaDB)
-    3. Mark as 'processed' or 'failed'
-    """
+    """Same as before, but now uses pgvector"""
     doc_id = data.get('doc_id')
     website_id = data.get('website_id')
     doc_type = data.get('doc_type', 'file')
     file_path = data.get('file_path')
     text_content = data.get('text_content')
-    filename = data.get('filename')
 
     if not doc_id or not website_id:
-        logger.error(f"❌ Missing doc_id or website_id in event: {data}")
+        logger.error(f"❌ Missing doc_id or website_id")
         return
 
     try:
         doc = Document.objects.get(id=doc_id)
     except Document.DoesNotExist:
-        logger.error(f"❌ Document {doc_id} not found in DB — skipping")
+        logger.error(f"❌ Document {doc_id} not found")
         return
 
-    # ── Mark as processing ────────────────────────────────────────────────────
     doc.status = 'processing'
     doc.save(update_fields=['status'])
-    logger.info(f"⚙️  Processing document {doc_id} (type={doc_type})")
-    logger.info(f"⚙️  Processing document {doc_id} (type={doc_type})")
-    logger.info(f"DEBUG doc_type raw: {repr(doc_type)}")
 
     try:
         if doc_type == 'file':
-            # ✅ File upload — extract and embed
-            if not file_path or not os.path.exists(file_path):
-                raise FileNotFoundError(f"File not found at path: {file_path}")
-
             chunk_count = ingest_document(
                 website_id=website_id,
                 file_path=file_path,
-                
                 file_type=doc.file_type,
                 doc_id=doc_id,
             )
-
         elif doc_type == 'text':
-
-            # ✅ Text upload — generate PDF, then extract and embed
-            if not text_content:
-                raise ValueError("text_content is empty for text-type document")
-
-            # 1. Generate PDF from text
-            pdf_path = generate_pdf_from_text(text_content)
-            
-            # 2. Ingest text to ChromaDB
             chunk_count = ingest_text(
                 website_id=website_id,
                 text_content=text_content,
                 doc_id=doc_id,
             )
-            
-            # 3. Update Document with file path and type
-            doc.file_path = pdf_path
-            doc.file_size = os.path.getsize(pdf_path)
-            doc.file_type = 'application/pdf'
-            doc.save(update_fields=['file', 'file_type','file_size'])
-            logger.info(f"✅ you are at the {pdf_path}")
 
-        else:
-            raise ValueError(f"Unknown doc_type: {doc_type}")
-
-        # ── Success ───────────────────────────────────────────────────────────
         doc.status = 'processed'
         doc.chunk_count = chunk_count
         doc.processed_at = timezone.now()
         doc.error_message = ''
         doc.save(update_fields=['status', 'chunk_count', 'processed_at', 'error_message'])
-        logger.info(f"✅ Document {doc_id} processed — {chunk_count} chunks stored")
+        logger.info(f"✅ Document {doc_id} processed — {chunk_count} chunks")
 
     except Exception as exc:
-        # ── Failure ───────────────────────────────────────────────────────────
-        logger.error(f"❌ Failed to process document {doc_id}: {exc}", exc_info=True)
+        logger.error(f"❌ Failed to process {doc_id}: {exc}", exc_info=True)
         doc.status = 'failed'
         doc.error_message = str(exc)
         doc.save(update_fields=['status', 'error_message'])
