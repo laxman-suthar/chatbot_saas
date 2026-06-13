@@ -79,6 +79,8 @@ pipeline {
                             --from-literal=DEBUG="False" \
                             --from-literal=ALLOWED_HOSTS="*" \
                             --from-literal=CORS_ALLOW_ALL_ORIGINS="True" \
+                            --from-literal=CORS_ORIGINS="http://localhost:3000,http://127.0.0.1" \
+                            --from-literal=CSRF_TRUSTED_ORIGINS="http://localhost:3000,http://127.0.0.1" \
                             --from-literal=DB_NAME="postgres" \
                             --from-literal=DB_USER="${DB_USER}" \
                             --from-literal=DB_PASSWORD="${DB_PASSWORD}" \
