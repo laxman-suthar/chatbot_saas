@@ -7,6 +7,10 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
     SpectacularRedocView
 )
+from django.http import JsonResponse
+
+def health_check(request):
+    return JsonResponse({'status': 'ok'})
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -23,4 +27,5 @@ urlpatterns = [
     path('api/chat/', include('chat.urls')),
     path('api/analytics/', include('analytics.urls')),
     path('api/auth/', include('accounts.google_urls')),
+    path('health/', health_check),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
