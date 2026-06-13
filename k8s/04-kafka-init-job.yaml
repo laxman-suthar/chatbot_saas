@@ -1,0 +1,26 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-init
+  namespace: chatbot
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-for-kafka
+          image: busybox
+          command: ['sh', '-c', 'until nc -z kafka-service 9092; do echo waiting for kafka; sleep 5; done']
+      containers:
+        - name: kafka-init
+          image: confluentinc/cp-kafka:7.7.0
+          command:
+            - sh
+            - -c
+            - |
+              kafka-topics.sh --create --if-not-exists \
+              --bootstrap-server kafka-service:9092 \
+              --topic document-upload \
+              --partitions 1 \
+              --replication-factor 1 && \
+              echo 'Topic document-upload created'

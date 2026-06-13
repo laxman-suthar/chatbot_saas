@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: chatbot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: laxmansuthardev/chatbot-web:latest  # updated by Jenkins
+          command:
+            - sh
+            - -c
+            - |
+              python manage.py migrate &&
+              python manage.py collectstatic --noinput &&
+              daphne -b 0.0.0.0 -p 8000 --http-timeout 60 chatbot.asgi:application
+          ports:
+            - containerPort: 8000
+          env:
+            - name: ASGI_THREADS
+              value: "4"
+          envFrom:
+            - secretRef:
+                name: chatbot-secrets
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "300m"
+          readinessProbe:
+            httpGet:
+              path: /health/
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-service
+  namespace: chatbot
+spec:
+  selector:
+    app: web
+  ports:
+    - port: 8000
+      targetPort: 8000
